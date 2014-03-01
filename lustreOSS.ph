@@ -9,9 +9,9 @@ our ($miniFiller, $rate, $SEP, $datetime, $intSecs, $totSecs, $showColFlag);
 our ($firstPass, $debug, $filename, $playback, $ioSizeFlag, $verboseFlag);
 our ($OneKB, $OneMB, $OneGB, $TenGB);
 our ($miniDateTime, $options, $FS, $Host, $XCFlag, $interval, $count);
-our ($sameColsFlag);
+our ($sameColsFlag, $subsys, $ReqDir);
 
-require "LustreSingleton.pm";
+require "$ReqDir/LustreSingleton.pm";
 
 # Global to this module
 my $lustOpts = undef;
@@ -363,6 +363,9 @@ sub lustreGetOssStats {
 sub lustreOSSInit {
   my $impOptsref = shift;
   my $impKeyref = shift;
+
+  error("You must remove the -sl or -sL option to use this plugin")
+    if ($subsys =~ /l/i);
 
   $lustOpts = ${$impOptsref};
   error('Valid lustre options are: s d B C') 

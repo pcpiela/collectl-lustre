@@ -9,9 +9,9 @@ our ($miniFiller, $rate, $SEP, $datetime, $intSecs, $totSecs, $showColFlag);
 our ($firstPass, $debug, $filename, $playback, $ioSizeFlag, $verboseFlag);
 our ($OneKB, $OneMB, $OneGB, $TenGB);
 our ($miniDateTime, $options, $FS, $Host, $XCFlag, $interval, $count);
-our ($sameColsFlag);
+our ($sameColsFlag, $subsys, $ReqDir);
 
-require "LustreSingleton.pm";
+require "$ReqDir/LustreSingleton.pm";
 
 # Global to this module
 my $lustOpts = undef;
@@ -282,7 +282,13 @@ sub lustreGetMdsStats {
   my $mds_stats_file = '';
   my $mds_rpc_stats_file = '';
   my $mds_client_stats_dir = '';
-  if ($lustre_version ge '2.1.1') { 
+  if ($lustre_version ge '2.5.0') {
+    my $mdt_dir = getMdtDir("/proc/fs/lustre/mdt");
+        
+    $mds_stats_file = "$mdt_dir/md_stats";
+    $mds_rpc_stats_file = "/proc/fs/lustre/mds/MDS/mdt/stats";
+    $mds_client_stats_dir = "$mdt_dir/exports";
+  } elsif ($lustre_version ge '2.1.1') { 
     my $mdt_dir = getMdtDir("/proc/fs/lustre/mdt");
         
     $mds_stats_file = "$mdt_dir/md_stats";
@@ -317,6 +323,9 @@ sub lustreGetMdsStats {
 sub lustreMDSInit {
   my $impOptsref = shift;
   my $impKeyref = shift;
+
+  error("You must remove the -sl or -sL option to use this plugin")
+    if ($subsys =~ /l/i);
 
   $lustOpts = ${$impOptsref};
   error('Valid lustre options are: s C') 
