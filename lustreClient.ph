@@ -535,7 +535,7 @@ sub lustreClientAnalyze {
     } elsif ($metric =~ /dirty_pages_misses/) {
       $attrId = 'dirty_pages_misses';
       $tot = \$lustreCltDirtyMissTot;
-    } elsif ($metric =~ /read/) {
+    } elsif ($metric =~ /read_bytes/) {
       $attrId = 'read';
       $tot = \$lustreCltReadTot;
 
