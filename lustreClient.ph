@@ -427,6 +427,9 @@ sub lustreClientInit {
   $lustOpts = 's' if !defined($lustOpts);
   ${impOptsref} = $lustOpts;
 
+  error("Lustre does not appear to be installed on this host") 
+    if (!defined $lustre_version);
+
   error("Lustre versions earlier than 1.8.0 are not currently supported")
     if ($lustre_version lt '1.8.0');
 
@@ -544,7 +547,7 @@ sub lustreClientAnalyze {
       $readKB->{value} = fix(($value - $readKB->{last}) / $OneKB);
       $readKB->{last} = $value;
       $lustreCltReadKBTot += $readKB->{value};
-    } elsif ($metric =~ /write/) {
+    } elsif ($metric =~ /write_bytes/) {
       $attrId = 'write';
       $tot = \$lustreCltWriteTot;
 

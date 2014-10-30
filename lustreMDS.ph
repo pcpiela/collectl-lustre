@@ -64,7 +64,13 @@ my $mdsFileCreateTOT = 0;
 
 my $limLusReints = 1000;
 
-logmsg('I', "Lustre version $lustre_version") if $printMsg;
+if ($printMsg) {
+  if (defined($lustre_version)) {
+    logmsg('I', "Lustre version $lustre_version");
+  } else {
+    logmsg('I', "Lustre version currently unknown");
+  }
+}
 
 sub getMdtDir {
   my ($baseDir) = @_;
@@ -115,6 +121,14 @@ sub createMdsClient {
 }
 
 sub lustreCheckMdsNew {
+  $lustre_version = $lustre_singleton->getVersion()
+    if (!defined($lustre_version));
+
+  return 0 if (!defined($lustre_version));
+
+  error("Lustre versions earlier than 1.8.0 are not currently supported")
+    if ($lustre_version lt '1.8.0');
+
   my $mdtDir = '/proc/fs/lustre/';
   $mdtDir .= ($lustre_version ge '2.1.1') ? 'mdt' : 'mds';
   
@@ -335,7 +349,7 @@ sub lustreMDSInit {
   ${impOptsref} = $lustOpts;
 
   error("Lustre versions earlier than 1.8.0 are not currently supported")
-    if ($lustre_version lt '1.8.0');
+    if (defined($lustre_version) && $lustre_version lt '1.8.0');
 
   print "lustreMDSInit: options: $lustOpts\n" if $printMsg;
 
@@ -372,6 +386,13 @@ sub lustreMDSInitInterval {
   $sameColsFlag = 0 if length($lustOptsOnly) > 1;
 }
 
+sub delta {
+  my $current = shift;
+  my $last = shift;
+
+  return ($current > $last) ? $current - $last : 0;
+}
+
 sub lustreMDSAnalyze {
   my $type = shift;
   my $dataref = shift;
@@ -383,19 +404,19 @@ sub lustreMDSAnalyze {
     my ($metric, $value) = (split(/\s+/, $data))[0, 6];
 
     if ($metric =~ /^req_waittime/) {
-      $lustreWaitDur = $value - $lustreWaitDurLast;
+      $lustreWaitDur = delta($value, $lustreWaitDurLast);
       $lustreWaitDurLast = $value;
     } elsif ($metric =~ /^req_qdepth/) {
-      $lustreQDepth = $value - $lustreQDepthLast;
+      $lustreQDepth = delta($value, $lustreQDepthLast);
       $lustreQDepthLast = $value;
     } elsif ($metric =~ /^req_active/) {
-      $lustreActive = $value - $lustreActiveLast;
+      $lustreActive = delta($value, $lustreActiveLast);
       $lustreActiveLast = $value;
     } elsif ($metric =~ /^req_timeout/) {
-      $lustreTimeout = $value - $lustreTimeoutLast;
+      $lustreTimeout = delta($value, $lustreTimeoutLast);
       $lustreTimeoutLast = $value;
     } elsif ($metric =~ /^reqbuf_avail/) {
-      $lustreReqBufs = $value - $lustreReqBufsLast;
+      $lustreReqBufs = delta($value, $lustreReqBufsLast);
       $lustreReqBufsLast = $value;
     }
   } elsif ($lustOpts =~ /s/ && $type =~ /MDS/) {
@@ -423,7 +444,7 @@ sub lustreMDSAnalyze {
       
       if ($attrId ne '') {
         my $attr = $mdsClientData{$client}{$attrId};
-        $attr->{value} = fix($value - $attr->{last});
+        $attr->{value} = delta($value, $attr->{last});
         $attr->{last} = $value;
       }
     } else {
@@ -451,7 +472,7 @@ sub lustreMDSAnalyze {
 
       if (defined($attrId)) {
         my $attr = $mdsData{$attrId};
-        $attr->{value} = fix($value - $attr->{last});
+        $attr->{value} = delta($value, $attr->{last});
         $attr->{last} = $value;
       } else {
         logmsg('W', "Unrecognized performance stat: $metric");

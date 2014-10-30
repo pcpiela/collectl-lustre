@@ -82,7 +82,13 @@ my $numBrwBuckets = scalar(@brwBuckets);
 my @brwDiskIoSizeBuckets = [];
 my $numBrwDiskIoSizeBuckets = scalar(@brwDiskIoSizeBuckets);
 
-logmsg('I', "Lustre version $lustre_version") if $printMsg;
+if ($printMsg) {
+  if (defined($lustre_version)) {
+    logmsg('I', "Lustre version $lustre_version");
+  } else {
+    logmsg('I', "Lustre version currently unknown");
+  }
+}
 
 =pod
 sub transLustreUUID {
@@ -126,6 +132,14 @@ sub createOst {
 }
 
 sub lustreCheckOss { 
+  $lustre_version = $lustre_singleton->getVersion()
+    if (!defined($lustre_version));
+
+  return 0 if (!defined($lustre_version));
+
+  error("Lustre versions earlier than 1.8.0 are not currently supported")
+    if ($lustre_version lt '1.8.0');
+
   # if this wasn't an OSS and still isn't, nothing has changed.
   return 0 if ($numOst == 0) && !-e "/proc/fs/lustre/obdfilter";
 
@@ -375,7 +389,7 @@ sub lustreOSSInit {
   ${impOptsref} = $lustOpts;
 
   error("Lustre versions earlier than 1.8.0 are not currently supported")
-    if ($lustre_version lt '1.8.0');
+    if (defined($lustre_version) && ($lustre_version lt '1.8.0'));
 
   print "lustreOSSInit: options: $lustOpts\n" if $printMsg;
 
@@ -434,6 +448,13 @@ sub lustreOSSInitInterval {
   }
 }
 
+sub delta {
+  my $current = shift;
+  my $last = shift;
+
+  return ($current > $last) ? $current - $last : 0;
+}
+
 sub lustreOSSAnalyze {
   my $type = shift;
   my $dataref = shift;
@@ -445,19 +466,19 @@ sub lustreOSSAnalyze {
     my ($metric, $value) = (split(/\s+/, $data))[0, 6];
 
     if ($metric =~ /^req_waittime/) {
-      $lustreWaitDur = $value - $lustreWaitDurLast;
+      $lustreWaitDur = delta($value, $lustreWaitDurLast);
       $lustreWaitDurLast = $value;
     } elsif ($metric =~ /^req_qdepth/) {
-      $lustreQDepth = $value - $lustreQDepthLast;
+      $lustreQDepth = delta($value, $lustreQDepthLast);
       $lustreQDepthLast = $value;
     } elsif ($metric =~ /^req_active/) {
-      $lustreActive = $value - $lustreActiveLast;
+      $lustreActive = delta($value, $lustreActiveLast);
       $lustreActiveLast = $value;
     } elsif ($metric =~ /^req_timeout/) {
-      $lustreTimeout = $value - $lustreTimeoutLast;
+      $lustreTimeout = delta($value, $lustreTimeoutLast);
       $lustreTimeoutLast = $value;
     } elsif ($metric =~ /^reqbuf_avail/) {
-      $lustreReqBufs = $value - $lustreReqBufsLast;
+      $lustreReqBufs = delta($value, $lustreReqBufsLast);
       $lustreReqBufsLast = $value;
     }
   } elsif ($type =~ /OST_(.*)/) {
@@ -467,27 +488,27 @@ sub lustreOSSAnalyze {
     $bytes = 0 if $ops == 0;
     if ($metric =~ /^read/) {
       my $attr = $ostData{$ostName}{read};
-      my $val = fix($ops - $attr->{last});
+      my $val = delta($ops, $attr->{last});
       $attr->{value} = $val;
       $attr->{last} = $ops;
       $lustreReadOpsTot += $val;
 
       $attr = $ostData{$ostName}{readKB};
       my $KBytes = $bytes / $OneKB;
-      $val = fix($KBytes - $attr->{last});
+      $val = delta($KBytes, $attr->{last});
       $attr->{value} = $val;
       $attr->{last} = $KBytes;
       $lustreReadKBytesTot += $val;
     } elsif ($metric =~ /^write/) {
       my $attr = ${ostData}{$ostName}{write};
-      my $val = fix($ops - $attr->{last});
+      my $val = delta($ops, $attr->{last});
       $attr->{value} = $val;
       $attr->{last} = $ops;
       $lustreWriteOpsTot += $val;
 
       $attr = $ostData{$ostName}{writeKB};
       my $KBytes = $bytes / $OneKB;
-      $val = fix($KBytes - $attr->{last});
+      $val = delta($KBytes, $attr->{last});
       $attr->{value} = $val;
       $attr->{last} = $KBytes;
       $lustreWriteKBytesTot += $val;
@@ -513,7 +534,7 @@ sub lustreOSSAnalyze {
             $ostAttr->{$client} = {'value' => 0, 'last' => $bytes};
           } else {
             my $attr = ${$ostAttr}{$client};
-            $attr->{value} = fix($bytes - $attr->{last});
+            $attr->{value} = delta($bytes, $attr->{last});
             $attr->{last} = $bytes;
           }
         }
@@ -532,13 +553,13 @@ sub lustreOSSAnalyze {
     my ($reads, $writes) = (split(/\s+/, $data))[1,5];
 
     my $attr = $ostData{$ostName}{rpc_read}[$bufNum];
-    my $val = fix($reads - $attr->{last});
+    my $val = delta($reads, $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $reads;
     $lustreBufReadTot[$bufNum] += $val;
 
     $attr = $ostData{$ostName}{rpc_write}[$bufNum];
-    $val = fix($writes - $attr->{last});
+    $val = delta($writes, $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $writes;
     $lustreBufWriteTot[$bufNum] += $val;
@@ -555,13 +576,13 @@ sub lustreOSSAnalyze {
     my ($reads, $writes) = (split(/\s+/, $data))[1,5];
 
     my $attr = $ostData{$ostName}{disk_iosize_read}[$bufNum];
-    my $val = fix($reads - $attr->{last});
+    my $val = delta($reads, $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $reads;
     $lustreDiskIoSizeReadTot[$bufNum] += $val;
 
     $attr = $ostData{$ostName}{disk_iosize_write}[$bufNum];
-    $val = fix($writes - $attr->{last});
+    $val = delta($writes - $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $writes;
     $lustreDiskIoSizeWriteTot[$bufNum] += $val;
@@ -1056,11 +1077,9 @@ sub lustreOSSPrintExport {
             my $cliWrite = 0;
             
             foreach my $ostName (@ostNames) {
-              $cliRead = fix($cliRead + 
-                             $ostClientRead{$ostName}{$client}{value}) 
+              $cliRead += $ostClientRead{$ostName}{$client}{value} 
                 if (exists($ostClientRead{$ostName}{$client}));
-              $cliWrite = fix($cliWrite + 
-                              $ostClientWrite{$ostName}{$client}{value})
+              $cliWrite += $ostClientWrite{$ostName}{$client}{value}
                 if (exists($ostClientWrite{$ostName}{$client}));
             }
             
