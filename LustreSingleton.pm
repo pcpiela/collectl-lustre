@@ -1,4 +1,7 @@
 # copyright, 2014 Terascala, Inc. All rights reserved
+#
+# lustreSingleton may be copied only under the terms of either the 
+# Artistic License or the GNU General Public License
 
 package LustreSingleton;
 

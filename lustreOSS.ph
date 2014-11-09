@@ -1,4 +1,7 @@
 # copyright, 2014 Terascala, Inc. All rights reserved
+#
+# lustreOSS may be copied only under the terms of either the Artistic License
+# or the GNU General Public License
 
 # Lustre OSS Data Collector
 
@@ -20,17 +23,6 @@ my $lustre_singleton = new LustreSingleton();
 my $lustre_version = $lustre_singleton->getVersion();
 my $METRIC = {value => 0, last => 0};
 my $printMsg = $debug & 16384;
-
-# Figure out how many intervals we want to check for lustre config changes,
-# noting that in the debugging case where the interval is 0, we calculate it
-# based on a day's worth of seconds.
-my $checkCounter = 0;
-my $svcConfigInterval = 0;
-my $checkIntervals = ($interval != 0) ? 
-  int($svcConfigInterval / $interval) : 
-  int($count / (86400 / $svcConfigInterval));
-$checkIntervals = 1 if $checkIntervals == 0;
-logmsg('I', "Lustre Check Intervals: $checkIntervals") if $printMsg;
 
 my @clientNames = (); # Ordered list of OSS clients
 my %clientNamesHash = ();
@@ -426,11 +418,7 @@ sub lustreOSSGetData {
 sub lustreOSSInitInterval {
   # Check to see if any services changed and if they did, we may need
   # a new logfile as well.
-  if (++$checkCounter == $checkIntervals) {
-    newLog($filename, "", "", "", "", "")
-      if lustreCheckOss() && $filename ne '';
-    $checkCounter = 0;
-  }
+  newLog($filename, "", "", "", "", "") if lustreCheckOss() && $filename ne '';
 
   $sameColsFlag = 0 if length($lustOptsOnly) > 1;
 
