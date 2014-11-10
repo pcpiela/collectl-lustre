@@ -295,8 +295,8 @@ sub lustreGetOstRpcSizeStats {
   return(0) if (!open PROC, "<$proc");
 
   # Skip to beginning of rpc data
-  for (my $i = 0; $i < 4; $i++) {
-    <PROC>;
+  while (my $line = <PROC>) {
+    last if (index($line, "pages per bulk r/w") == 0);
   }
 
   my $index = 0;
