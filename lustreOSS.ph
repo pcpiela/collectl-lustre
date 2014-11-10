@@ -440,7 +440,7 @@ sub delta {
   my $current = shift;
   my $last = shift;
 
-  return ($current > $last) ? $current - $last : 0;
+  return (defined $last && ($current > $last)) ? $current - $last : 0;
 }
 
 sub lustreOSSAnalyze {
@@ -570,7 +570,7 @@ sub lustreOSSAnalyze {
     $lustreDiskIoSizeReadTot[$bufNum] += $val;
 
     $attr = $ostData{$ostName}{disk_iosize_write}[$bufNum];
-    $val = delta($writes - $attr->{last});
+    $val = delta($writes, $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $writes;
     $lustreDiskIoSizeWriteTot[$bufNum] += $val;
