@@ -379,7 +379,7 @@ sub delta {
   my $current = shift;
   my $last = shift;
 
-  return ($current > $last) ? $current - $last : 0;
+  return (defined $last && ($current > $last)) ? $current - $last : 0;
 }
 
 sub lustreMDSAnalyze {
