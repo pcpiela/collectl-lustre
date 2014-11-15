@@ -22,6 +22,7 @@ my $lustOptsOnly = undef;
 my $lustre_singleton = new LustreSingleton();
 my $lustre_version = $lustre_singleton->getVersion();
 my $METRIC = {value => 0, last => 0};
+my $SUM_METRIC = {value => 0, lastCumulcount => undef, lastSum => undef};
 my $printMsg = $debug & 16384;
 
 my @clientNames = (); # Ordered list of MDS/OSS clients
@@ -35,17 +36,6 @@ my $reportMdsFlag = 0;
 my $mdtNamesStr = ''; # Concatenated string of MDT names
 my %mdsData = (); # MDS performance metrics
 my %mdsClientData = (); # MDS client access metrics indexed by client id
-
-my $lustreWaitDur = 0;
-my $lustreWaitDurLast = 0;
-my $lustreQDepth = 0;
-my $lustreQDepthLast = 0;
-my $lustreActive = 0;
-my $lustreActiveLast = 0;
-my $lustreTimeout = 0;
-my $lustreTimeoutLast = 0;
-my $lustreReqBufs = 0;
-my $lustreReqBufsLast = 0;
 
 my $mdsGetattrPlusTOT = 0;
 my $mdsSetattrPlusTOT = 0;
@@ -98,7 +88,13 @@ sub createMdt {
              open => {%{$METRIC}},
              close => {%{$METRIC}},
              mkdir => {%{$METRIC}},
-             rmdir => {%{$METRIC}}};
+             rmdir => {%{$METRIC}},
+             req_active => {%{$SUM_METRIC}},
+             req_qdepth => {%{$SUM_METRIC}},
+             req_waittime => {%{$SUM_METRIC}},
+	     req_timeout => {%{$SUM_METRIC}},
+	     reqbuf_avail => {%{$SUM_METRIC}}
+  };             
   return $mdt;
 }
 
@@ -298,7 +294,8 @@ sub lustreGetMdsStats {
     my $mdt_dir = getMdtDir("/proc/fs/lustre/mdt");
         
     $mds_stats_file = "$mdt_dir/md_stats";
-    $mds_rpc_stats_file = "$mdt_dir/stats";
+    $mds_rpc_stats_file = ($lustre_version ge '2.1.6') ? 
+      "$mdt_dir/mdt/stats" : "$mdt_dir/stats";
     $mds_client_stats_dir = "$mdt_dir/exports";
   } elsif ($lustre_singleton->getVersion() ge '1.8.8') {
     my $mdt_dir = getMdtDir("/proc/fs/lustre/mds");
@@ -382,6 +379,26 @@ sub delta {
   return (defined $last && ($current > $last)) ? $current - $last : 0;
 }
 
+sub updateSumMetric {
+  my $metric = shift;
+  my $cumulCount = shift;
+  my $sum = shift;
+
+  if (defined $metric->{lastCumulCount} && defined $metric->{lastSum}) {
+    if ($cumulCount == $metric->{lastCumulCount}) {
+      $metric->{value} = 0;
+    } elsif ($cumulCount > $metric->{lastCumulCount} &&
+	$sum >= $metric->{lastSum}) {
+      $metric->{value} = ($sum - $metric->{lastSum}) / 
+	  ($cumulCount - $metric->{lastCumulCount});
+    }
+  } else {
+    $metric->{value} = 0;
+  }
+  $metric->{lastCumulCount} = $cumulCount;
+  $metric->{lastSum} = $sum;
+}
+
 sub lustreMDSAnalyze {
   my $type = shift;
   my $dataref = shift;
@@ -390,23 +407,20 @@ sub lustreMDSAnalyze {
   logmsg('I', "lustreMDSAnalyze: type: $type, data: $data") if $printMsg;
 
   if ($lustOpts =~ /s/ && $type =~ /MDS_RPC/) {
-    my ($metric, $value) = (split(/\s+/, $data))[0, 6];
+    my ($metric, $cumulCount, $sum) = (split(/\s+/, $data))[0, 1, 6];
 
-    if ($metric =~ /^req_waittime/) {
-      $lustreWaitDur = delta($value, $lustreWaitDurLast);
-      $lustreWaitDurLast = $value;
-    } elsif ($metric =~ /^req_qdepth/) {
-      $lustreQDepth = delta($value, $lustreQDepthLast);
-      $lustreQDepthLast = $value;
-    } elsif ($metric =~ /^req_active/) {
-      $lustreActive = delta($value, $lustreActiveLast);
-      $lustreActiveLast = $value;
-    } elsif ($metric =~ /^req_timeout/) {
-      $lustreTimeout = delta($value, $lustreTimeoutLast);
-      $lustreTimeoutLast = $value;
-    } elsif ($metric =~ /^reqbuf_avail/) {
-      $lustreReqBufs = delta($value, $lustreReqBufsLast);
-      $lustreReqBufsLast = $value;
+    my $attrId = '';
+    if ($metric =~ /^req_waittime/) { $attrId = 'req_waittime'; }
+    elsif ($metric =~ /^req_qdepth/) { $attrId = 'req_qdepth'; }
+    elsif ($metric =~ /^req_active/) { $attrId = 'req_active'; }
+    elsif ($metric =~ /^req_timeout/) { $attrId = 'req_timeout'; }
+    elsif ($metric =~ /^reqbuf_avail/) { $attrId = 'reqbuf_avail'; }
+
+    if (defined($attrId)) {
+      my $attr = $mdsData{$attrId};
+      updateSumMetric($attr, $cumulCount, $sum);
+    } else {
+      logmsg('W', "Unrecognized performance stat: $metric");
     }
   } elsif ($lustOpts =~ /s/ && $type =~ /MDS/) {
     my ($metric, $value) = (split(/\s+/, $data))[0,1];
@@ -671,35 +685,35 @@ sub lustreMDSPrintExport {
   if ($type eq 'g') {
     if ($lustOpts =~ /s/) {
       if ($mdsFlag) {
-        push @$ref1, 'lusoss.waittime';
+        push @$ref1, 'lusmdss.waittime';
         push @$ref2, 'usec';
-        push @$ref3, $lustreWaitDur;
+        push @$ref3, $mdsData{req_waittime}{value};
         push @$ref4, 'Lustre MDS RPC';
         push @$ref5, 'Request Wait Time';
 
-        push @$ref1, 'lusoss.qdepth';
+        push @$ref1, 'lusmds.qdepth';
         push @$ref2, 'queue depth';
-        push @$ref3, $lustreQDepth;
+        push @$ref3, $mdsData{req_qdepth}{value};
         push @$ref4, 'Lustre MDS RPC';
         push @$ref5, 'Request Queue Depth';
 
-        push @$ref1, 'lusoss.active';
+        push @$ref1, 'lusmds.active';
         push @$ref2, 'RPCs';
-        push @$ref3, $lustreActive;
+        push @$ref3, $mdsData{req_active}{value};
         push @$ref4, 'Lustre MDS RPC',;
         push @$ref5, 'Active Requests';
 
-        push @$ref1, 'lusoss.timeouts';
+        push @$ref1, 'lusmds.timeouts';
         push @$ref2, 'RPC timeouts';
-        push @$ref3, $lustreTimeout;
+        push @$ref3, $mdsData{req_timeout}{value};
         push @$ref4, 'Lustre MDS RPC';
         push @$ref5, 'Request Timeouts';
 
-        push @$ref1, 'lusoss.buffers';
+        push @$ref1, 'lusmds.buffers';
         push @$ref2, 'RPC buffers';
-        push @$ref3, $lustreReqBufs;
+        push @$ref3, $mdsData{reqbuf_avail}{value};
         push @$ref4, 'Lustre MDS RPC';
-        push @$ref5, 'LNET Request Buffers';
+        push @$ref5, 'Available Buffers';
 
         my $getattrPlus = $mdsData{getattr}{value} +
           $mdsData{getattr_lock}{value} + 

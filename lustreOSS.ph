@@ -22,6 +22,7 @@ my $lustOptsOnly = undef;
 my $lustre_singleton = new LustreSingleton();
 my $lustre_version = $lustre_singleton->getVersion();
 my $METRIC = {value => 0, last => 0};
+my $SUM_METRIC = {value => 0, lastCumulCount => undef, lastSum => undef};
 my $printMsg = $debug & 16384;
 
 my @clientNames = (); # Ordered list of OSS clients
@@ -32,6 +33,7 @@ my $numClients = 0; # Number of clients accessing this OSS
 my $numOst = 0; # Number of object storage targets
 my $ossFlag = 0;
 my $reportOssFlag = 0;
+my %ossData = (); # OSS performance metrics
 my @ostNames = (); # Ordered list of OST names
 my $ostNamesStr = ''; # Concatenated string of OST names
 my %ostSubdirs = ();
@@ -40,16 +42,6 @@ my %ostClientWrite = ();
 my $ostWidth = 0;
 my %ostData = (); # OSS performance metrics indexed by OST name
 
-my $lustreWaitDur = 0;
-my $lustreWaitDurLast = 0;
-my $lustreQDepth = 0;
-my $lustreQDepthLast = 0;
-my $lustreActive = 0;
-my $lustreActiveLast = 0;
-my $lustreTimeout = 0;
-my $lustreTimeoutLast = 0;
-my $lustreReqBufs = 0;
-my $lustreReqBufsLast = 0;
 my @lustreBufReadTot = [];
 my @lustreBufWriteTot = [];
 my @lustreDiskIoSizeReadTot = [];
@@ -123,6 +115,19 @@ sub createOst {
   return $ost;
 }
 
+sub createOss {
+  my $oss = {};
+
+  foreach my $svc ("normal", "bulk") {
+    $oss->{req_active}{$svc} = {%{$SUM_METRIC}};
+    $oss->{req_qdepth}{$svc} = {%{$SUM_METRIC}};
+    $oss->{req_waittime}{$svc} = {%{$SUM_METRIC}};
+    $oss->{req_timeout}{$svc} = {%{$SUM_METRIC}};
+    $oss->{reqbuf_avail}{$svc} = {%{$SUM_METRIC}};
+  }
+  return $oss;
+}
+
 sub lustreCheckOss { 
   $lustre_version = $lustre_singleton->getVersion()
     if (!defined($lustre_version));
@@ -134,6 +139,11 @@ sub lustreCheckOss {
 
   # if this wasn't an OSS and still isn't, nothing has changed.
   return 0 if ($numOst == 0) && !-e "/proc/fs/lustre/obdfilter";
+
+  if (!%ossData) {
+    my $oss = createOss();
+    %ossData = %{$oss};
+  }
 
   undef %ostSubdirs;
 
@@ -349,7 +359,8 @@ sub lustreGetOstClientStats {
 }
 
 sub lustreGetOssStats {
-  lustreGetRpcStats("/proc/fs/lustre/ost/OSS/ost/stats", "OST_RPC");
+  lustreGetRpcStats("/proc/fs/lustre/ost/OSS/ost/stats", "OST_RPC_NORMAL");
+  lustreGetRpcStats("/proc/fs/lustre/ost/OSS/ost_io/stats", "OST_RPC_BULK");
 
   foreach my $ostName (@ostNames) {
     lustreGetOstStats($ostName);
@@ -443,6 +454,26 @@ sub delta {
   return (defined $last && ($current > $last)) ? $current - $last : 0;
 }
 
+sub updateSumMetric {
+  my $metric = shift;
+  my $cumulCount = shift;
+  my $sum = shift;
+
+  if (defined $metric->{lastCumulCount} && defined $metric->{lastSum}) {
+    if ($cumulCount == $metric->{lastCumulCount}) {
+      $metric->{value} = 0;
+    } elsif ($cumulCount > $metric->{lastCumulCount} &&
+	$sum >= $metric->{lastSum}) {
+      $metric->{value} = ($sum - $metric->{lastSum}) / 
+	  ($cumulCount - $metric->{lastCumulCount});
+    }
+  } else {
+    $metric->{value} = 0;
+  }
+  $metric->{lastCumulCount} = $cumulCount;
+  $metric->{lastSum} = $sum;
+}
+
 sub lustreOSSAnalyze {
   my $type = shift;
   my $dataref = shift;
@@ -451,23 +482,23 @@ sub lustreOSSAnalyze {
   logmsg('I', "lustreAnalyze: type: $type, data: $data") if $printMsg;
 
   if ($type =~ /OST_RPC/) {
-    my ($metric, $value) = (split(/\s+/, $data))[0, 6];
+    my $svc = lc((split('_', $type))[2]);
 
-    if ($metric =~ /^req_waittime/) {
-      $lustreWaitDur = delta($value, $lustreWaitDurLast);
-      $lustreWaitDurLast = $value;
-    } elsif ($metric =~ /^req_qdepth/) {
-      $lustreQDepth = delta($value, $lustreQDepthLast);
-      $lustreQDepthLast = $value;
-    } elsif ($metric =~ /^req_active/) {
-      $lustreActive = delta($value, $lustreActiveLast);
-      $lustreActiveLast = $value;
-    } elsif ($metric =~ /^req_timeout/) {
-      $lustreTimeout = delta($value, $lustreTimeoutLast);
-      $lustreTimeoutLast = $value;
-    } elsif ($metric =~ /^reqbuf_avail/) {
-      $lustreReqBufs = delta($value, $lustreReqBufsLast);
-      $lustreReqBufsLast = $value;
+    my ($metric, $cumulCount, $sum) = (split(/\s+/, $data))[0, 1, 6];
+
+    my $attrId = '';
+    if ($metric =~ /^req_waittime/) { $attrId = 'req_waittime'; }
+    elsif ($metric =~ /^req_qdepth/) { $attrId = 'req_qdepth'; }
+    elsif ($metric =~ /^req_active/) { $attrId = 'req_active'; }
+    elsif ($metric =~ /^req_timeout/) { $attrId = 'req_timeout'; }
+    elsif ($metric =~ /^reqbuf_avail/) { $attrId = 'reqbuf_avail'; }
+
+    if (defined($attrId)) {
+      my $attr = $ossData{$attrId}{$svc};
+      updateSumMetric($attr, $cumulCount, $sum);
+      print "$svc $attrId ($cumulCount, $sum) = " . $attr->{value} . "\n";
+    } else {
+      logmsg('W', "Unrecognized performance stat: $svc $metric");
     }
   } elsif ($type =~ /OST_(.*)/) {
     my $ostName = $1;
@@ -960,35 +991,39 @@ sub lustreOSSPrintExport {
 
     if ($lustOpts =~ /d/) {
       if ($ossFlag) {
-        push @$ref1, 'lusoss.waittime';
-        push @$ref2, 'usec';
-        push @$ref3, $lustreWaitDur;
-        push @$ref4, 'Lustre OSS RPC';
-        push @$ref5, 'Request Wait Time';
+	foreach my $svc (keys %{$ossData{req_waittime}}) {
+	  my $metricGroup = "Lustre OSS [$svc] RPC";
+
+	  push @$ref1, "lusoss.$svc.waittime";
+	  push @$ref2, 'usec';
+	  push @$ref3, $ossData{req_waittime}{$svc}{value};
+	  push @$ref4, $metricGroup;
+	  push @$ref5, 'Request Wait Time';
         
-        push @$ref1, 'lusoss.qdepth';
-        push @$ref2, 'queue depth';
-        push @$ref3, $lustreQDepth;
-        push @$ref4, 'Lustre OSS RPC';
-        push @$ref5, 'Request Queue Depth';
+	  push @$ref1, "lusoss.$svc.qdepth";
+	  push @$ref2, 'queue depth';
+	  push @$ref3, $ossData{req_qdepth}{$svc}{value};
+	  push @$ref4, $metricGroup;
+	  push @$ref5, 'Request Queue Depth';
+	  
+	  push @$ref1, "lusoss.$svc.active";
+	  push @$ref2, 'RPCs';
+	  push @$ref3, $ossData{req_active}{$svc}{value};
+	  push @$ref4, $metricGroup;
+	  push @$ref5, 'Active Requests';
+	  
+	  push @$ref1, "lusoss.$svc.timeouts";
+	  push @$ref2, 'RPC timeouts';
+	  push @$ref3, $ossData{req_timeout}{$svc}{value};
+	  push @$ref4, $metricGroup;
+	  push @$ref5, 'Request Timeouts';
         
-        push @$ref1, 'lusoss.active';
-        push @$ref2, 'RPCs';
-        push @$ref3, $lustreActive;
-        push @$ref4, 'Lustre OSS RPC';
-        push @$ref5, 'Active Requests';
-        
-        push @$ref1, 'lusoss.timeouts';
-        push @$ref2, 'RPC timeouts';
-        push @$ref3, $lustreTimeout;
-        push @$ref4, 'Lustre OSS RPC';
-        push @$ref5, 'Request Timeouts';
-        
-        push @$ref1, 'lusoss.buffers';
-        push @$ref2, 'RPC buffers';
-        push @$ref3, $lustreReqBufs;
-        push @$ref4, 'Lustre OSS RPC';
-        push @$ref5, 'LNET Request Buffers';
+	  push @$ref1, "lusoss.$svc.buffers";
+	  push @$ref2, 'RPC buffers';
+	  push @$ref3, $ossData{reqbuf_avail}{$svc}{value};
+	  push @$ref4, $metricGroup;
+	  push @$ref5, 'Available Buffers';
+	}
         
         foreach my $ostName (@ostNames) {
           my $ost = $ostData{$ostName};
