@@ -496,7 +496,6 @@ sub lustreOSSAnalyze {
     if (defined($attrId)) {
       my $attr = $ossData{$attrId}{$svc};
       updateSumMetric($attr, $cumulCount, $sum);
-      print "$svc $attrId ($cumulCount, $sum) = " . $attr->{value} . "\n";
     } else {
       logmsg('W', "Unrecognized performance stat: $svc $metric");
     }

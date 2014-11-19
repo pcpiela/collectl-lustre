@@ -685,7 +685,7 @@ sub lustreMDSPrintExport {
   if ($type eq 'g') {
     if ($lustOpts =~ /s/) {
       if ($mdsFlag) {
-        push @$ref1, 'lusmdss.waittime';
+        push @$ref1, 'lusmds.waittime';
         push @$ref2, 'usec';
         push @$ref3, $mdsData{req_waittime}{value};
         push @$ref4, 'Lustre MDS RPC';
