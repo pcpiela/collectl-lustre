@@ -45,6 +45,7 @@ my $mdsReintUnlinkTOT = 0;
 my $mdsFileCreateTOT = 0;
 
 my $limLusReints = 1000;
+my $NO_SAMPLE = -12341234;
 
 if ($printMsg) {
   if (defined($lustre_version)) {
@@ -70,36 +71,38 @@ sub getMdtDir {
 }
 
 sub createMdt {
-  my $mdt = {getattr => {%{$METRIC}},
-             getattr_lock => {%{$METRIC}},
-             statfs => {%{$METRIC}},
-             getxattr => {%{$METRIC}},
-             setxattr => {%{$METRIC}},
-             sync => {%{$METRIC}},
-             connect => {%{$METRIC}},
+  my $mdt = {close => {%{$METRIC}},
+	     connect => {%{$METRIC}},
              disconnect => {%{$METRIC}},
+             file_create => {%{$METRIC}},
+	     getattr => {%{$METRIC}},
+             getattr_lock => {%{$METRIC}},
+             getxattr => {%{$METRIC}},
+             mkdir => {%{$METRIC}},
+             open => {%{$METRIC}},
              reint => {%{$METRIC}},
              reint_create => {%{$METRIC}},
              reint_link => {%{$METRIC}},
-             reint_setattr => {%{$METRIC}},
              reint_rename => {%{$METRIC}},
+             reint_setattr => {%{$METRIC}},
              reint_unlink => {%{$METRIC}},
-             file_create => {%{$METRIC}},
-             open => {%{$METRIC}},
-             close => {%{$METRIC}},
-             mkdir => {%{$METRIC}},
-             rmdir => {%{$METRIC}},
              req_active => {%{$SUM_METRIC}},
              req_qdepth => {%{$SUM_METRIC}},
-             req_waittime => {%{$SUM_METRIC}},
 	     req_timeout => {%{$SUM_METRIC}},
-	     reqbuf_avail => {%{$SUM_METRIC}}
+             req_waittime => {%{$SUM_METRIC}},
+	     reqbuf_avail => {%{$SUM_METRIC}},
+             rmdir => {%{$METRIC}},
+             setattr => {%{$METRIC}},
+             setxattr => {%{$METRIC}},
+             statfs => {%{$METRIC}},
+             sync => {%{$METRIC}},
+             unlink => {%{$METRIC}}
   };             
   return $mdt;
 }
 
 sub createMdsClient {
-  my $mdsClient = {create => {%{$METRIC}},
+  my $mdsClient = {file_create => {%{$METRIC}},
                    unlink => {%{$METRIC}},
                    getattr => {%{$METRIC}},
                    setattr => {%{$METRIC}},
@@ -208,17 +211,18 @@ sub lustreCheckMdsNew {
 }
 
 sub lustreGetRpcStats {
-  my ($proc, $tag) = @_;
+  my $proc = shift;
+
   if (!open PROC, "<$proc") {
     return(0);
   }
   while (my $line = <PROC>) {
-    if (($line =~ /req_waittime/) ||
-        ($line =~ /req_qdepth/) ||
-        ($line =~ /req_active/) ||
-        ($line =~ /req_timeout/) ||
-        ($line =~ /reqbuf_avail/)) {
-      record(2, "$tag $line" ); 
+    if (($line =~ /^req_waittime /) ||
+        ($line =~ /^req_qdepth /) ||
+        ($line =~ /^req_active /) ||
+        ($line =~ /^req_timeout /) ||
+        ($line =~ /^reqbuf_avail /)) {
+      record(2, "MDS_RPC $line" ); 
     }
   }
   close PROC;
@@ -226,53 +230,78 @@ sub lustreGetRpcStats {
 }
 
 sub lustreGetMdtStats {
-  my ($proc) = @_;
-  my $tag = 'MDS';
+  my $proc_mdt = shift;
+  my $proc_mds = shift;
+  my %lines = map {$_ => undef} qw(connect 
+                                   close 
+                                   disconnect
+	                           file_create
+	                           getattr
+	                           getattr_lock
+	                           getxattr
+	                           mkdir
+	                           open
+	                           reint
+	                           reint_create
+	                           reint_link
+	                           reint_rename
+	                           reint_setattr
+	                           reint_unlink
+	                           rmdir
+	                           setattr
+	                           setxattr
+	                           statfs
+	                           sync
+                                   unlink);
 
-  return(0) if (!open PROC, "<$proc");
-
-  while (my $line = <PROC>) {
-    if ($line =~ /^mds_/) { 
-      record(2, "$tag $line"); 
-    } # Lustre 1.8.8
-
-    # Lustre 2.1.5. Make attribute names look like 1.8.8 when appropriate
-    if (($line =~ /^setattr/) || ($line =~ /^unlink/)) {
-      record(2, "$tag mds_reint_$line"); 
+  if (open PROC, "<$proc_mds") {
+    while (my $line = <PROC>) {
+      if ($line =~ /^mds_(\S+) /) {
+	my $metric = $1;
+	if (exists $lines{$metric}) {
+	  # Remove mds_
+	  substr($line, 0, 4) = "";
+	  $lines{$metric} = $line;
+	}
+      }
     }
+    close PROC;
+  }
 
-    if (($line =~ /^getattr/) ||
-        ($line =~ /^sync/) ||
-        ($line =~ /^statfs/) ||
-        ($line =~ /^getxattr/)) {
-      record(2, "$tag mds_$line"); 
-    }
-
-    if (($line =~ /^open/) ||
-        ($line =~ /^close/) ||
-        ($line =~ /^mkdir/) ||
-        ($line =~ /^rmdir/) ||
-        ($line =~ /^file_create/)) { 
-      record(2, "$tag $line"); 
+  # mdt <metric> values supercede those from the mds file
+  if (open PROC, "<$proc_mdt") {
+    while (my $line = <PROC>) {
+      if ($line =~ /^(\S+) /) {
+	my $metric = $1;
+	if (exists $lines{$metric}) {
+	  $lines{$metric} = $line;
+	}
+      }
     }
   }
   close PROC;
+
+  while (my ($metric, $line) = each %lines) {
+    record(2, "MDS $line") if defined $line; 
+  }
+
   return(1);
 }
 
 sub lustreGetMdtClientStats {
-  my ($client, $proc) = @_;
-  my $tag = 'MDS';
+  my $client = shift;
+  my $proc = shift;
   
   return(0) if (!open PROC, "<$proc");
 
   while (my $line = <PROC>) {
-    if (($line =~ /attr/) ||
-        ($line =~ /^file_create/) ||
-        ($line =~ /^unlink/) ||
-        ($line =~ /^open/) ||
-        ($line =~ /^close/)) {
-      record(2, "$tag LCL_$client" . "_$line"); 
+    if (($line =~ /^getattr /) ||
+	($line =~ /^setattr /) ||
+        ($line =~ /^file_create /) ||
+        ($line =~ /^unlink /) ||
+        ($line =~ /^open /) ||
+        ($line =~ /^close /)) {
+      record(2, "MDS LCL-$client" . "-$line"); 
     }
   }
   close PROC;
@@ -282,38 +311,42 @@ sub lustreGetMdtClientStats {
 sub lustreGetMdsStats {
   # collect stats from the MDS
   my $mds_stats_file = '';
+  my $mdt_stats_file = '';
   my $mds_rpc_stats_file = '';
   my $mds_client_stats_dir = '';
   if ($lustre_version ge '2.5.0') {
     my $mdt_dir = getMdtDir("/proc/fs/lustre/mdt");
         
-    $mds_stats_file = "$mdt_dir/md_stats";
+    $mds_stats_file = "/proc/fs/lustre/mds/MDS/mdt/stats";
+    $mdt_stats_file = "$mdt_dir/md_stats";
     $mds_rpc_stats_file = "/proc/fs/lustre/mds/MDS/mdt/stats";
     $mds_client_stats_dir = "$mdt_dir/exports";
   } elsif ($lustre_version ge '2.1.1') { 
     my $mdt_dir = getMdtDir("/proc/fs/lustre/mdt");
         
-    $mds_stats_file = "$mdt_dir/md_stats";
-    $mds_rpc_stats_file = ($lustre_version ge '2.1.6') ? 
-      "$mdt_dir/mdt/stats" : "$mdt_dir/stats";
+    $mds_stats_file = "$mdt_dir/mdt/stats";
+    $mdt_stats_file = "$mdt_dir/md_stats";
+    $mds_rpc_stats_file = "$mdt_dir/mdt/stats";
     $mds_client_stats_dir = "$mdt_dir/exports";
   } elsif ($lustre_singleton->getVersion() ge '1.8.8') {
     my $mdt_dir = getMdtDir("/proc/fs/lustre/mds");
 
-    $mds_stats_file = "$mdt_dir/stats";
+    $mds_stats_file = "/proc/fs/lustre/mdt/MDS/mds/stats";
+    $mdt_stats_file = "$mdt_dir/stats";
     $mds_rpc_stats_file = "/proc/fs/lustre/mdt/MDS/mds/stats";
     $mds_client_stats_dir = "$mdt_dir/exports";
   } else {
     my $mdt_dir = getMdtDir("/proc/fs/lustre/mds");
 
     $mds_stats_file = "/proc/fs/lustre/mdt/MDS/mds/stats";
+    $mdt_stats_file = "$mdt_dir/stats";
     $mds_rpc_stats_file = $mds_stats_file;
     $mds_client_stats_dir = "$mdt_dir/exports";
   }
 
-  lustreGetRpcStats("$mds_rpc_stats_file", "MDS_RPC");
+  lustreGetRpcStats("$mds_rpc_stats_file");
 
-  lustreGetMdtStats("$mds_stats_file");
+  lustreGetMdtStats($mdt_stats_file, $mds_stats_file);
 
   foreach my $client (@clientNames) {
     print "client stats file: $mds_client_stats_dir/exports/$client/stats\n"
@@ -369,7 +402,7 @@ sub lustreMDSInitInterval {
   newLog($filename, "", "", "", "", "")
     if lustreCheckMdsNew() && $filename ne '';
 
-  $sameColsFlag = 0 if length($lustOptsOnly) > 1;
+  $sameColsFlag = 0 if (length($lustOptsOnly) > 1) || $verboseFlag;
 }
 
 sub delta {
@@ -386,7 +419,7 @@ sub updateSumMetric {
 
   if (defined $metric->{lastCumulCount} && defined $metric->{lastSum}) {
     if ($cumulCount == $metric->{lastCumulCount}) {
-      $metric->{value} = 0;
+      $metric->{value} = $NO_SAMPLE;
     } elsif ($cumulCount > $metric->{lastCumulCount} &&
 	$sum >= $metric->{lastSum}) {
       $metric->{value} = ($sum - $metric->{lastSum}) / 
@@ -408,78 +441,23 @@ sub lustreMDSAnalyze {
 
   if ($lustOpts =~ /s/ && $type =~ /MDS_RPC/) {
     my ($metric, $cumulCount, $sum) = (split(/\s+/, $data))[0, 1, 6];
-
-    my $attrId = '';
-    if ($metric =~ /^req_waittime/) { $attrId = 'req_waittime'; }
-    elsif ($metric =~ /^req_qdepth/) { $attrId = 'req_qdepth'; }
-    elsif ($metric =~ /^req_active/) { $attrId = 'req_active'; }
-    elsif ($metric =~ /^req_timeout/) { $attrId = 'req_timeout'; }
-    elsif ($metric =~ /^reqbuf_avail/) { $attrId = 'reqbuf_avail'; }
-
-    if (defined($attrId)) {
-      my $attr = $mdsData{$attrId};
-      updateSumMetric($attr, $cumulCount, $sum);
-    } else {
-      logmsg('W', "Unrecognized performance stat: $metric");
-    }
+    my $attr = $mdsData{$metric};
+    updateSumMetric($attr, $cumulCount, $sum);
   } elsif ($lustOpts =~ /s/ && $type =~ /MDS/) {
     my ($metric, $value) = (split(/\s+/, $data))[0,1];
 
     if ($metric =~ /^LCL/) {
-      my $client;
-      my @tmpNames = split("_", $metric);
-      foreach (@tmpNames) {
-        if ($_ =~ /@/) {
-          $client = $_;
-          last;
-        }
-      }
+      my ($client, $metric) = (split("-", $metric))[1, 2];
       
       print "metric: $metric, value: $value\n" if $printMsg;
 
-      my $attrId = '';
-      if ($metric =~ /create/) { $attrId = 'create'; }
-      elsif ($metric =~ /unlink/) { $attrId = 'unlink'; }
-      elsif ($metric =~ /getattr/) { $attrId = 'getattr'; }
-      elsif ($metric =~ /setattr/) { $attrId = 'setattr'; }
-      elsif ($metric =~ /open/) { $attrId = 'open'; }
-      elsif ($metric =~ /close/) { $attrId = 'close'; }
-      
-      if ($attrId ne '') {
-        my $attr = $mdsClientData{$client}{$attrId};
-        $attr->{value} = delta($value, $attr->{last});
-        $attr->{last} = $value;
-      }
+      my $attr = $mdsClientData{$client}{$metric};
+      $attr->{value} = delta($value, $attr->{last});
+      $attr->{last} = $value;
     } else {
-      my $attrId;
-      if ($metric =~ /^mds_getattr$/) { $attrId = 'getattr'; }
-      elsif ($metric =~ /^mds_getattr_lock/) { $attrId = 'getattr_lock'; }
-      elsif ($metric =~ /^mds_statfs/) { $attrId = 'statfs'; }
-      elsif ($metric =~ /^mds_getxattr/) { $attrId = 'getxattr'; }
-      elsif ($metric =~ /^mds_setxattr/) { $attrId = 'setxattr'; }
-      elsif ($metric =~ /^mds_sync/) { $attrId = 'sync'; }
-      elsif ($metric =~ /^mds_connect/) { $attrId = 'connect'; }
-      elsif ($metric =~ /^mds_disconnect/) { $attrId = 'disconnect'; }
-      elsif ($metric =~ /^mds_reint$/) { $attrId = 'reint'; }
-      # These 5 were added in 1.6.5.1 and are mutually exclusive with mds_reint
-      elsif ($metric =~ /^mds_reint_create/) { $attrId = 'reint_create'; }
-      elsif ($metric =~ /^mds_reint_link/) { $attrId = 'reint_link';  }
-      elsif ($metric =~ /^mds_reint_setattr/) { $attrId = 'reint_setattr'; }
-      elsif ($metric =~ /^mds_reint_rename/) { $attrId = 'reint_rename'; }
-      elsif ($metric =~ /^mds_reint_unlink/) { $attrId = 'reint_unlink'; }
-      elsif ($metric =~ /^file_create/) { $attrId = 'file_create'; }
-      elsif ($metric =~ /^open/) { $attrId = 'open'; }
-      elsif ($metric =~ /^close/) { $attrId = 'close'; }
-      elsif ($metric =~ /^mkdir/) { $attrId = 'mkdir'; }
-      elsif ($metric =~ /^rmdir/) { $attrId = 'rmdir'; }
-
-      if (defined($attrId)) {
-        my $attr = $mdsData{$attrId};
-        $attr->{value} = delta($value, $attr->{last});
-        $attr->{last} = $value;
-      } else {
-        logmsg('W', "Unrecognized performance stat: $metric");
-      }
+      my $attr = $mdsData{$metric};
+      $attr->{value} = delta($value, $attr->{last});
+      $attr->{last} = $value;
     }
   }
 }
@@ -503,18 +481,20 @@ sub lustreMDSPrintBrief {
     # MDS
     if ($lustOpts =~ /s/ && $reportMdsFlag) {
       my $setattrPlus = $mdsData{reint_setattr}{value} +
+	$mdsData{setattr}{value} +
         $mdsData{setxattr}{value};
       my $getattrPlus = 
         $mdsData{getattr}{value} + 
         $mdsData{getattr_lock}{value} + 
         $mdsData{getxattr}{value};
 
-      my $delete = $mdsData{reint_unlink}{value};
-      $delete += $mdsData{rmdir}{value} if ($lustre_version ge '1.8.8');
+      my $delete = $mdsData{reint_unlink}{value} +
+	$mdsData{unlink}{value} +
+	$mdsData{rmdir}{value};
 
-      my $create = ($lustre_version ge '1.8.8' ) ? 
-        $mdsData{file_create}{value} + $mdsData{mkdir}{value} :
-        $mdsData{reint_create}{value};
+      my $create = $mdsData{file_create}{value} + 
+	$mdsData{mkdir}{value} +
+	$mdsData{reint_create}{value};
 
       ${$lineref} .= sprintf("%6s %6s %6s %6s %6s",
                              cvt($getattrPlus / $intSecs, 6),
@@ -537,6 +517,7 @@ sub lustreMDSPrintBrief {
         $mdsData{getattr_lock}{value} + 
         $mdsData{getxattr}{value};
       $mdsSetattrPlusTOT += $mdsData{reint_setattr}{value} +
+	$mdsData{setattr}{value} +
         $mdsData{setxattr}{value};
       $mdsSyncTOT += $mdsData{sync}{value};
       $mdsReintTOT += $mdsData{reint}{value};
@@ -556,6 +537,15 @@ sub lustreMDSPrintBrief {
   }
 }
 
+sub sumMetricValStr {
+  my $val = shift;
+  my $width = shift;
+
+  return ($val == $NO_SAMPLE) ? 
+      sprintf("%".$width."s", " ") : 
+      sprintf("%".$width."d", $val);
+}
+
 sub lustreMDSPrintVerbose {
   my $printHeader = shift;
   my $homeFlag = shift;
@@ -566,18 +556,16 @@ sub lustreMDSPrintVerbose {
   
   # This is the normal output for an MDS
   if ($lustOpts =~ /s/ && $reportMdsFlag) {
-    if ($printHeader) {
-      my $line = '';
-      $line .= "\n" if !$homeFlag;
-      $line .= "# LUSTRE MDS SUMMARY ($rate)\n";
-      $line .= "#${miniDateTime} Getattr GttrLck  StatFS    Sync  Gxattr  Sxattr Connect Disconn";
-      $line .= " Create   Link Setattr Rename Unlink";
-      $line .= " FCreate    Open   Close   Mkdir   Rmdir" 
+    my $line = '';
+    $line .= "\n" if !$homeFlag;
+    $line .= "# LUSTRE MDS SUMMARY ($rate)\n";
+    $line .= "#${miniDateTime} Getattr GttrLck  StatFS    Sync  Gxattr  Sxattr Connect Disconn";
+    $line .= " Create   Link Setattr Rename Unlink";
+    $line .= " FCreate    Open   Close   Mkdir   Rmdir" 
         if ($lustre_version ge '1.8.8');
-      $line .= "\n";
-      ${$lineref} .= $line;
-      exit if $showColFlag;
-    }
+    $line .= "\n";
+    ${$lineref} .= $line;
+    exit if $showColFlag;
 
     # Don't report if exception processing in effect and we're below limit
     # NOTE - exception processing only for versions < 1.6.5
@@ -597,9 +585,11 @@ sub lustreMDSPrintVerbose {
       $line .= sprintf(" %6d %6d %7d %6d %6d",
                        $mdsData{reint_create}{value} / $intSecs, 
                        $mdsData{reint_link}{value} / $intSecs, 
-                       $mdsData{reint_setattr}{value} / $intSecs, 
+                       ($mdsData{reint_setattr}{value} +
+			$mdsData{setattr}{value}) / $intSecs, 
                        $mdsData{reint_rename}{value} / $intSecs,
-                       $mdsData{reint_unlink}{value} / $intSecs);
+                       ($mdsData{reint_unlink}{value} + 
+			$mdsData{unlink}{value}) / $intSecs);
                        
       $line .= sprintf(" %7d %7d %7d %7d %7d",
                        $mdsData{file_create}{value} / $intSecs, 
@@ -609,6 +599,29 @@ sub lustreMDSPrintVerbose {
                        $mdsData{rmdir}{value} / $intSecs) 
         if ($lustre_version ge '1.8.8');
     }
+    $line .= "\n";
+    ${$lineref} .= $line;
+
+    $line = '';
+    $line .= "\n";
+    $line .= "# LUSTRE MDS RPC SUMMARY (Normal ops)\n";
+    $line .= "#${miniDateTime} Active Queue Waittime Timeout Available";
+    $line .= "\n";
+    ${$lineref} .= $line;
+    $line = '';
+    $line .= "#${miniDateTime}        Depth  (usec)   (sec)   Buffers";
+    $line .= "\n";
+    ${$lineref} .= $line;
+
+    my $req_active = sumMetricValStr($mdsData{req_active}{value}, 6);
+    my $req_qdepth = sumMetricValStr($mdsData{req_qdepth}{value}, 5);
+    my $req_waittime = sumMetricValStr($mdsData{req_waittime}{value}, 8);
+    my $req_timeout = sumMetricValStr($mdsData{req_timeout}{value}, 7);
+    my $reqbuf_avail = sumMetricValStr($mdsData{reqbuf_avail}{value}, 9);
+
+    $line = '';
+    $line .= $datetime . "  " . $req_active . " " . $req_qdepth . " " .
+	$req_waittime . " " . $req_timeout . " " . $reqbuf_avail;
     $line .= "\n";
     ${$lineref} .= $line;
   }
@@ -660,9 +673,11 @@ sub lustreMDSPrintPlot {
                        $mdsData{reint}{value} / $intSecs,
                        $mdsData{reint_create}{value} / $intSecs, 
                        $mdsData{reint_link}{value} / $intSecs, 
-                       $mdsData{reint_setattr}{value} / $intSecs,
+                       ($mdsData{reint_setattr}{value} +
+			$mdsData{setattr}{value}) / $intSecs,
                        $mdsData{reint_rename}{value} / $intSecs,
-                       $mdsData{reint_unlink}{value} / $intSecs,
+                       ($mdsData{reint_unlink}{value} +
+			$mdsData{unlink}{value}) / $intSecs,
                        $mdsData{file_create}{value} / $intSecs);
     }
 
@@ -685,40 +700,51 @@ sub lustreMDSPrintExport {
   if ($type eq 'g') {
     if ($lustOpts =~ /s/) {
       if ($mdsFlag) {
-        push @$ref1, 'lusmds.waittime';
-        push @$ref2, 'usec';
-        push @$ref3, $mdsData{req_waittime}{value};
-        push @$ref4, 'Lustre MDS RPC';
-        push @$ref5, 'Request Wait Time';
+	if ($mdsData{req_waittime}{value} != $NO_SAMPLE) {
+	  push @$ref1, 'lusmds.waittime';
+	  push @$ref2, 'usec';
+	  push @$ref3, $mdsData{req_waittime}{value};
+	  push @$ref4, 'Lustre MDS RPC';
+	  push @$ref5, 'Request Wait Time';
+	}
 
-        push @$ref1, 'lusmds.qdepth';
-        push @$ref2, 'queue depth';
-        push @$ref3, $mdsData{req_qdepth}{value};
-        push @$ref4, 'Lustre MDS RPC';
-        push @$ref5, 'Request Queue Depth';
+	if ($mdsData{req_qdepth}{value} != $NO_SAMPLE) {
+	  push @$ref1, 'lusmds.qdepth';
+	  push @$ref2, 'queue depth';
+	  push @$ref3, $mdsData{req_qdepth}{value};
+	  push @$ref4, 'Lustre MDS RPC';
+	  push @$ref5, 'Request Queue Depth';
+	}
 
-        push @$ref1, 'lusmds.active';
-        push @$ref2, 'RPCs';
-        push @$ref3, $mdsData{req_active}{value};
-        push @$ref4, 'Lustre MDS RPC',;
-        push @$ref5, 'Active Requests';
+	if ($mdsData{req_active}{value} != $NO_SAMPLE) {
+	  push @$ref1, 'lusmds.active';
+	  push @$ref2, 'RPCs';
+	  push @$ref3, $mdsData{req_active}{value};
+	  push @$ref4, 'Lustre MDS RPC',;
+	  push @$ref5, 'Active Requests';
+	}
 
-        push @$ref1, 'lusmds.timeouts';
-        push @$ref2, 'RPC timeouts';
-        push @$ref3, $mdsData{req_timeout}{value};
-        push @$ref4, 'Lustre MDS RPC';
-        push @$ref5, 'Request Timeouts';
+	if ($mdsData{req_timeout}{value} != $NO_SAMPLE) {
+	  push @$ref1, 'lusmds.timeout';
+	  push @$ref2, 'sec';
+	  push @$ref3, $mdsData{req_timeout}{value};
+	  push @$ref4, 'Lustre MDS RPC';
+	  push @$ref5, 'Request Timeout';
+	}
 
-        push @$ref1, 'lusmds.buffers';
-        push @$ref2, 'RPC buffers';
-        push @$ref3, $mdsData{reqbuf_avail}{value};
-        push @$ref4, 'Lustre MDS RPC';
-        push @$ref5, 'Available Buffers';
+	if ($mdsData{reqbuf_avail}{value} != $NO_SAMPLE) {
+	  push @$ref1, 'lusmds.buffers';
+	  push @$ref2, 'RPC buffers';
+	  push @$ref3, $mdsData{reqbuf_avail}{value};
+	  push @$ref4, 'Lustre MDS RPC';
+	  push @$ref5, 'Available Buffers';
+	}
 
         my $getattrPlus = $mdsData{getattr}{value} +
           $mdsData{getattr_lock}{value} + 
           $mdsData{getxattr}{value};
         my $setattrPlus = $mdsData{reint_setattr}{value} +
+	  $mdsData{setattr}{value} +
           $mdsData{setxattr}{value};
 
         push @$ref1, 'lusmds.gattrP';
@@ -739,8 +765,9 @@ sub lustreMDSPrintExport {
         push @$ref4, 'Lustre MDS';
         push @$ref5, 'File Syncs';
 
-        my $delete = $mdsData{reint_unlink}{value};
-        $delete += $mdsData{rmdir}{value} if ($lustre_version ge '1.8.8');
+        my $delete = $mdsData{reint_unlink}{value} +
+	  $mdsData{unlink}{value} +
+	  $mdsData{rmdir}{value};
 
         push @$ref1, 'lusmds.unlink';
         push @$ref2, 'ops/sec', 
@@ -748,8 +775,8 @@ sub lustreMDSPrintExport {
         push @$ref4, 'Lustre MDS';
         push @$ref5, 'File/Dir Deletes';
 
-        my $create = ($lustre_version ge '1.8.8') ? 
-          $mdsData{file_create}{value} + $mdsData{mkdir}{value} : 
+        my $create = $mdsData{file_create}{value} + 
+	  $mdsData{mkdir}{value} +
           $mdsData{reint_create}{value};
 
         push @$ref1, 'lusmds.create';
@@ -794,7 +821,7 @@ sub lustreMDSPrintExport {
 
             push @$ref1, "$clientName.create";
             push @$ref2, 'creates/sec';
-            push @$ref3, $client->{create}{value} / $intSecs;
+            push @$ref3, $client->{file_create}{value} / $intSecs;
             push @$ref4, 'Lustre Client File Create';
             push @$ref5, "File Creates - $clientName";
 
@@ -821,12 +848,14 @@ sub lustreMDSPrintExport {
           $mdsData{getattr_lock}{value} + 
           $mdsData{getxattr}{value};
         my $setattrPlus = $mdsData{reint_setattr}{value} +
+	  $mdsData{setattr}{value} +
           $mdsData{setxattr}{value};
-        my $create = ($lustre_version ge '1.8.8') ? 
-          $mdsData{file_create}{value} + $mdsData{mkdir}{value} : 
+        my $create = $mdsData{file_create}{value} + 
+	  $mdsData{mkdir}{value} +
           $mdsData{reint_create}{value};
-        my $delete = $mdsData{reint_unlink}{value};
-        $delete += $mdsData{rmdir}{value} if ($lustre_version ge '1.8.8');
+        my $delete = $mdsData{reint_unlink}{value} +
+	  $mdsData{unlink}{value} +
+	  $mdsData{rmdir}{value};
         
         push @$ref1, 'lusmds.gattrP';
         push @$ref2, $getattrPlus / $intSecs;
@@ -854,12 +883,14 @@ sub lustreMDSPrintExport {
           $mdsData{getattr_lock}{last} + 
           $mdsData{getxattr}{last};
         my $setattrPlus = $mdsData{reint_setattr}{last} +
+	  $mdsData{setattr}{last} +
           $mdsData{setxattr}{last};
-        my $create = ($lustre_version ge '1.8.8') ? 
-          $mdsData{file_create}{last} + $mdsData{mkdir}{last} : 
+        my $create = $mdsData{file_create}{last} +
+	  $mdsData{mkdir}{last} +
           $mdsData{reint_create}{last};
-        my $delete = $mdsData{reint_unlink}{last};
-        $delete += $mdsData{rmdir}{last} if ($lustre_version ge '1.8.8');
+        my $delete = $mdsData{reint_unlink}{last} +
+	  $mdsData{unlink}{last} +
+	  $mdsData{rmdir}{last};
         
         $$ref1 .= 
           "$pad(lusmds (getattrP $getattrPlus) (setattrP $setattrPlus) ";
