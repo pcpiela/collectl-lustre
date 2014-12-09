@@ -15,6 +15,8 @@ our ($miniDateTime, $options, $FS, $Host, $XCFlag, $interval, $count);
 our ($sameColsFlag, $subsys, $ReqDir);
 
 require "$ReqDir/LustreSingleton.pm";
+use lib "$ReqDir";
+use LustreCommon;
 
 # Global to this module
 my $lustOpts = undef;
@@ -57,7 +59,6 @@ my $lustreWriteOpsTot = 0;
 my $lustreWriteOpsTOT = 0;
 
 my $limLusKBS = 100;
-my $NO_SAMPLE = -12341234;
 
 # Global to count how many buckets there are for brw_stats
 my @brwBuckets = [];
@@ -75,24 +76,6 @@ if ($printMsg) {
   }
 }
 
-=pod
-sub transLustreUUID {
-  my $name = shift;
-  my $hostRoot;
-  
-  # This handles names like OST_Lustre9_2_UUID or OST_Lustre9_UUID
-  # changing them to just 0,9 or ost123.
-  chomp $name;
-  $hostRoot = $Host;
-  $hostRoot =~ s/\d+$//;
-  $name =~ s/OST_$hostRoot\d+//;
-  $name =~ s/_UUID//;
-  $name =~ s/_//;
-  $name = 0 if $name eq '';
-  
-  return($name);
-}
-=cut
 sub createOst {
   my $ost = {read => {%{$METRIC}},
              readKB => {%{$METRIC}},
@@ -164,7 +147,7 @@ sub lustreCheckOss {
     $subdir = $1;
     
     my $uuid = cat("/proc/fs/lustre/obdfilter/$subdir/uuid");
-    my $ostName = transLustreUUID($uuid);
+    my $ostName = LustreCommon::transLustreUUID($uuid, $Host);
     $ostWidth = length($ostName) if $ostWidth < length($ostName);
     $ossFlag = $reportOssFlag = 1;
 
@@ -264,24 +247,6 @@ sub lustreCheckOss {
   return ($ostNamesStr ne $saveOstNamesStr) ? 1 : 0;
 }
 
-sub lustreGetRpcStats {
-  my ($proc, $tag) = @_;
-  if (!open PROC, "<$proc") {
-    return(0);
-  }
-  while (my $line = <PROC>) {
-    if (($line =~ /req_waittime/) ||
-        ($line =~ /req_qdepth/) ||
-        ($line =~ /req_active/) ||
-        ($line =~ /req_timeout/) ||
-        ($line =~ /reqbuf_avail/)) {
-      record(2, "$tag $line" ); 
-    }
-  }
-  close PROC;
-  return(1);
-}
-
 sub lustreGetOstStats {
   my ($ostName) = @_;
   my $tag = "OST_$ostName";
@@ -360,8 +325,10 @@ sub lustreGetOstClientStats {
 }
 
 sub lustreGetOssStats {
-  lustreGetRpcStats("/proc/fs/lustre/ost/OSS/ost/stats", "OST_RPC_NORMAL");
-  lustreGetRpcStats("/proc/fs/lustre/ost/OSS/ost_io/stats", "OST_RPC_BULK");
+  LustreCommon::lustreGetRpcStats("/proc/fs/lustre/ost/OSS/ost/stats", 
+				  "OST_RPC_NORMAL");
+  LustreCommon::lustreGetRpcStats("/proc/fs/lustre/ost/OSS/ost_io/stats",
+				  "OST_RPC_BULK");
 
   foreach my $ostName (@ostNames) {
     lustreGetOstStats($ostName);
@@ -455,26 +422,6 @@ sub delta {
   return (defined $last && ($current > $last)) ? $current - $last : 0;
 }
 
-sub updateSumMetric {
-  my $metric = shift;
-  my $cumulCount = shift;
-  my $sum = shift;
-
-  if (defined $metric->{lastCumulCount} && defined $metric->{lastSum}) {
-    if ($cumulCount == $metric->{lastCumulCount}) {
-      $metric->{value} = $NO_SAMPLE;
-    } elsif ($cumulCount > $metric->{lastCumulCount} &&
-	$sum >= $metric->{lastSum}) {
-      $metric->{value} = ($sum - $metric->{lastSum}) / 
-	  ($cumulCount - $metric->{lastCumulCount});
-    }
-  } else {
-    $metric->{value} = 0;
-  }
-  $metric->{lastCumulCount} = $cumulCount;
-  $metric->{lastSum} = $sum;
-}
-
 sub lustreOSSAnalyze {
   my $type = shift;
   my $dataref = shift;
@@ -496,7 +443,7 @@ sub lustreOSSAnalyze {
 
     if (defined($attrId)) {
       my $attr = $ossData{$attrId}{$svc};
-      updateSumMetric($attr, $cumulCount, $sum);
+      LustreCommon::updateSumMetric($attr, $cumulCount, $sum);
     } else {
       logmsg('W', "Unrecognized performance stat: $svc $metric");
     }
@@ -683,15 +630,6 @@ sub lustreOSSPrintBrief {
   }
 }
 
-sub sumMetricValStr {
-  my $val = shift;
-  my $width = shift;
-
-  return ($val == $NO_SAMPLE) ? 
-      sprintf("%".$width."s", " ") : 
-      sprintf("%".$width."d", $val);
-}
-
 sub lustreOSSPrintVerbose {
   my $printHeader = shift;
   my $homeFlag = shift;
@@ -842,11 +780,16 @@ sub lustreOSSPrintVerbose {
     ${$lineref} .= $line;
 
     foreach my $svc ("normal", "bulk") {
-      my $req_active = sumMetricValStr($ossData{req_active}{$svc}{value}, 6);
-      my $req_qdepth = sumMetricValStr($ossData{req_qdepth}{$svc}{value}, 5);
-      my $req_waittime = sumMetricValStr($ossData{req_waittime}{$svc}{value}, 8);
-      my $req_timeout = sumMetricValStr($ossData{req_timeout}{$svc}{value}, 7);
-      my $reqbuf_avail = sumMetricValStr($ossData{reqbuf_avail}{$svc}{value}, 9);
+      my $req_active = 
+	LustreCommon::sumMetricValStr($ossData{req_active}{$svc}{value}, 6);
+      my $req_qdepth = 
+	LustreCommon::sumMetricValStr($ossData{req_qdepth}{$svc}{value}, 5);
+      my $req_waittime = 
+	LustreCommon::sumMetricValStr($ossData{req_waittime}{$svc}{value}, 8);
+      my $req_timeout = 
+	LustreCommon::sumMetricValStr($ossData{req_timeout}{$svc}{value}, 7);
+      my $reqbuf_avail = 
+	LustreCommon::sumMetricValStr($ossData{reqbuf_avail}{$svc}{value}, 9);
 
       $line = $datetime . "  " . sprintf("%7s", $svc) . " " . 
 	$req_active . " " . $req_qdepth . " " .
@@ -1030,7 +973,7 @@ sub lustreOSSPrintExport {
 	foreach my $svc (keys %{$ossData{req_waittime}}) {
 	  my $metricGroup = "Lustre OSS [$svc] RPC";
 
-	  if ($ossData{req_waittime}{$svc}{value} != $NO_SAMPLE) {
+	  if ($ossData{req_waittime}{$svc}{value} != LustreCommon::NO_SAMPLE) {
 	    push @$ref1, "lusoss.$svc.waittime";
 	    push @$ref2, 'usec';
 	    push @$ref3, $ossData{req_waittime}{$svc}{value};
@@ -1038,7 +981,7 @@ sub lustreOSSPrintExport {
 	    push @$ref5, 'Request Wait Time';
 	  }
         
-	  if ($ossData{req_qdepth}{$svc}{value} != $NO_SAMPLE) {
+	  if ($ossData{req_qdepth}{$svc}{value} != LustreCommon::NO_SAMPLE) {
 	    push @$ref1, "lusoss.$svc.qdepth";
 	    push @$ref2, 'queue depth';
 	    push @$ref3, $ossData{req_qdepth}{$svc}{value};
@@ -1046,7 +989,7 @@ sub lustreOSSPrintExport {
 	    push @$ref5, 'Request Queue Depth';
 	  }
 	  
-	  if ($ossData{req_active}{$svc}{value} != $NO_SAMPLE) {
+	  if ($ossData{req_active}{$svc}{value} != LustreCommon::NO_SAMPLE) {
 	    push @$ref1, "lusoss.$svc.active";
 	    push @$ref2, 'RPCs';
 	    push @$ref3, $ossData{req_active}{$svc}{value};
@@ -1054,7 +997,7 @@ sub lustreOSSPrintExport {
 	    push @$ref5, 'Active Requests';
 	  }
 	  
-	  if ($ossData{req_timeout}{$svc}{value} != $NO_SAMPLE) {
+	  if ($ossData{req_timeout}{$svc}{value} != LustreCommon::NO_SAMPLE) {
 	    push @$ref1, "lusoss.$svc.timeout";
 	    push @$ref2, 'sec';
 	    push @$ref3, $ossData{req_timeout}{$svc}{value};
@@ -1062,7 +1005,7 @@ sub lustreOSSPrintExport {
 	    push @$ref5, 'Request Timeout';
 	  }
         
-	  if ($ossData{reqbuf_avail}{$svc}{value} != $NO_SAMPLE) {
+	  if ($ossData{reqbuf_avail}{$svc}{value} != LustreCommon::NO_SAMPLE) {
 	    push @$ref1, "lusoss.$svc.buffers";
 	    push @$ref2, 'RPC buffers';
 	    push @$ref3, $ossData{reqbuf_avail}{$svc}{value};

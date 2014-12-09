@@ -15,6 +15,8 @@ our ($miniDateTime, $options, $FS, $Host, $XCFlag, $interval, $count);
 our ($sameColsFlag, $subsys, $ReqDir);
 
 require "$ReqDir/LustreSingleton.pm";
+use lib "$ReqDir";
+use LustreCommon;
 
 # Global to this module
 my $lustOpts = undef;
@@ -45,7 +47,6 @@ my $mdsReintUnlinkTOT = 0;
 my $mdsFileCreateTOT = 0;
 
 my $limLusReints = 1000;
-my $NO_SAMPLE = -12341234;
 
 if ($printMsg) {
   if (defined($lustre_version)) {
@@ -210,25 +211,6 @@ sub lustreCheckMdsNew {
   return ($mdtNamesStr ne $saveMdtNamesStr) ? 1 : 0;
 }
 
-sub lustreGetRpcStats {
-  my $proc = shift;
-
-  if (!open PROC, "<$proc") {
-    return(0);
-  }
-  while (my $line = <PROC>) {
-    if (($line =~ /^req_waittime /) ||
-        ($line =~ /^req_qdepth /) ||
-        ($line =~ /^req_active /) ||
-        ($line =~ /^req_timeout /) ||
-        ($line =~ /^reqbuf_avail /)) {
-      record(2, "MDS_RPC $line" ); 
-    }
-  }
-  close PROC;
-  return(1);
-}
-
 sub lustreGetMdtStats {
   my $proc_mdt = shift;
   my $proc_mds = shift;
@@ -344,7 +326,7 @@ sub lustreGetMdsStats {
     $mds_client_stats_dir = "$mdt_dir/exports";
   }
 
-  lustreGetRpcStats("$mds_rpc_stats_file");
+  LustreCommon::lustreGetRpcStats("$mds_rpc_stats_file", 'MDS_RPC');
 
   lustreGetMdtStats($mdt_stats_file, $mds_stats_file);
 
@@ -412,26 +394,6 @@ sub delta {
   return (defined $last && ($current > $last)) ? $current - $last : 0;
 }
 
-sub updateSumMetric {
-  my $metric = shift;
-  my $cumulCount = shift;
-  my $sum = shift;
-
-  if (defined $metric->{lastCumulCount} && defined $metric->{lastSum}) {
-    if ($cumulCount == $metric->{lastCumulCount}) {
-      $metric->{value} = $NO_SAMPLE;
-    } elsif ($cumulCount > $metric->{lastCumulCount} &&
-	$sum >= $metric->{lastSum}) {
-      $metric->{value} = ($sum - $metric->{lastSum}) / 
-	  ($cumulCount - $metric->{lastCumulCount});
-    }
-  } else {
-    $metric->{value} = 0;
-  }
-  $metric->{lastCumulCount} = $cumulCount;
-  $metric->{lastSum} = $sum;
-}
-
 sub lustreMDSAnalyze {
   my $type = shift;
   my $dataref = shift;
@@ -442,7 +404,7 @@ sub lustreMDSAnalyze {
   if ($lustOpts =~ /s/ && $type =~ /MDS_RPC/) {
     my ($metric, $cumulCount, $sum) = (split(/\s+/, $data))[0, 1, 6];
     my $attr = $mdsData{$metric};
-    updateSumMetric($attr, $cumulCount, $sum);
+    LustreCommon::updateSumMetric($attr, $cumulCount, $sum);
   } elsif ($lustOpts =~ /s/ && $type =~ /MDS/) {
     my ($metric, $value) = (split(/\s+/, $data))[0,1];
 
@@ -537,15 +499,6 @@ sub lustreMDSPrintBrief {
   }
 }
 
-sub sumMetricValStr {
-  my $val = shift;
-  my $width = shift;
-
-  return ($val == $NO_SAMPLE) ? 
-      sprintf("%".$width."s", " ") : 
-      sprintf("%".$width."d", $val);
-}
-
 sub lustreMDSPrintVerbose {
   my $printHeader = shift;
   my $homeFlag = shift;
@@ -613,11 +566,16 @@ sub lustreMDSPrintVerbose {
     $line .= "\n";
     ${$lineref} .= $line;
 
-    my $req_active = sumMetricValStr($mdsData{req_active}{value}, 6);
-    my $req_qdepth = sumMetricValStr($mdsData{req_qdepth}{value}, 5);
-    my $req_waittime = sumMetricValStr($mdsData{req_waittime}{value}, 8);
-    my $req_timeout = sumMetricValStr($mdsData{req_timeout}{value}, 7);
-    my $reqbuf_avail = sumMetricValStr($mdsData{reqbuf_avail}{value}, 9);
+    my $req_active = 
+      LustreCommon::sumMetricValStr($mdsData{req_active}{value}, 6);
+    my $req_qdepth = 
+      LustreCommon::sumMetricValStr($mdsData{req_qdepth}{value}, 5);
+    my $req_waittime = 
+      LustreCommon::sumMetricValStr($mdsData{req_waittime}{value}, 8);
+    my $req_timeout = 
+      LustreCommon::sumMetricValStr($mdsData{req_timeout}{value}, 7);
+    my $reqbuf_avail = 
+      LustreCommon::sumMetricValStr($mdsData{reqbuf_avail}{value}, 9);
 
     $line = '';
     $line .= $datetime . "  " . $req_active . " " . $req_qdepth . " " .
@@ -700,7 +658,7 @@ sub lustreMDSPrintExport {
   if ($type eq 'g') {
     if ($lustOpts =~ /s/) {
       if ($mdsFlag) {
-	if ($mdsData{req_waittime}{value} != $NO_SAMPLE) {
+	if ($mdsData{req_waittime}{value} != LustreCommon::NO_SAMPLE) {
 	  push @$ref1, 'lusmds.waittime';
 	  push @$ref2, 'usec';
 	  push @$ref3, $mdsData{req_waittime}{value};
@@ -708,7 +666,7 @@ sub lustreMDSPrintExport {
 	  push @$ref5, 'Request Wait Time';
 	}
 
-	if ($mdsData{req_qdepth}{value} != $NO_SAMPLE) {
+	if ($mdsData{req_qdepth}{value} != LustreCommon::NO_SAMPLE) {
 	  push @$ref1, 'lusmds.qdepth';
 	  push @$ref2, 'queue depth';
 	  push @$ref3, $mdsData{req_qdepth}{value};
@@ -716,7 +674,7 @@ sub lustreMDSPrintExport {
 	  push @$ref5, 'Request Queue Depth';
 	}
 
-	if ($mdsData{req_active}{value} != $NO_SAMPLE) {
+	if ($mdsData{req_active}{value} != LustreCommon::NO_SAMPLE) {
 	  push @$ref1, 'lusmds.active';
 	  push @$ref2, 'RPCs';
 	  push @$ref3, $mdsData{req_active}{value};
@@ -724,7 +682,7 @@ sub lustreMDSPrintExport {
 	  push @$ref5, 'Active Requests';
 	}
 
-	if ($mdsData{req_timeout}{value} != $NO_SAMPLE) {
+	if ($mdsData{req_timeout}{value} != LustreCommon::NO_SAMPLE) {
 	  push @$ref1, 'lusmds.timeout';
 	  push @$ref2, 'sec';
 	  push @$ref3, $mdsData{req_timeout}{value};
@@ -732,7 +690,7 @@ sub lustreMDSPrintExport {
 	  push @$ref5, 'Request Timeout';
 	}
 
-	if ($mdsData{reqbuf_avail}{value} != $NO_SAMPLE) {
+	if ($mdsData{reqbuf_avail}{value} != LustreCommon::NO_SAMPLE) {
 	  push @$ref1, 'lusmds.buffers';
 	  push @$ref2, 'RPC buffers';
 	  push @$ref3, $mdsData{reqbuf_avail}{value};
