@@ -387,13 +387,6 @@ sub lustreMDSInitInterval {
   $sameColsFlag = 0 if (length($lustOptsOnly) > 1) || $verboseFlag;
 }
 
-sub delta {
-  my $current = shift;
-  my $last = shift;
-
-  return (defined $last && ($current > $last)) ? $current - $last : 0;
-}
-
 sub lustreMDSAnalyze {
   my $type = shift;
   my $dataref = shift;
@@ -414,11 +407,11 @@ sub lustreMDSAnalyze {
       print "metric: $metric, value: $value\n" if $printMsg;
 
       my $attr = $mdsClientData{$client}{$metric};
-      $attr->{value} = delta($value, $attr->{last});
+      $attr->{value} = LustreCommon::delta($value, $attr->{last});
       $attr->{last} = $value;
     } else {
       my $attr = $mdsData{$metric};
-      $attr->{value} = delta($value, $attr->{last});
+      $attr->{value} = LustreCommon::delta($value, $attr->{last});
       $attr->{last} = $value;
     }
   }

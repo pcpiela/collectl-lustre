@@ -70,4 +70,11 @@ sub updateSumMetric {
   $metric->{lastSum} = $sum;
 }
 
+sub delta {
+  my $current = shift;
+  my $last = shift;
+
+  return (defined $last && ($current > $last)) ? $current - $last : 0;
+}
+
 1;

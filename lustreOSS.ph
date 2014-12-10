@@ -415,13 +415,6 @@ sub lustreOSSInitInterval {
   }
 }
 
-sub delta {
-  my $current = shift;
-  my $last = shift;
-
-  return (defined $last && ($current > $last)) ? $current - $last : 0;
-}
-
 sub lustreOSSAnalyze {
   my $type = shift;
   my $dataref = shift;
@@ -454,27 +447,27 @@ sub lustreOSSAnalyze {
     $bytes = 0 if $ops == 0;
     if ($metric =~ /^read/) {
       my $attr = $ostData{$ostName}{read};
-      my $val = delta($ops, $attr->{last});
+      my $val = LustreCommon::delta($ops, $attr->{last});
       $attr->{value} = $val;
       $attr->{last} = $ops;
       $lustreReadOpsTot += $val;
 
       $attr = $ostData{$ostName}{readKB};
       my $KBytes = $bytes / $OneKB;
-      $val = delta($KBytes, $attr->{last});
+      $val = LustreCommon::delta($KBytes, $attr->{last});
       $attr->{value} = $val;
       $attr->{last} = $KBytes;
       $lustreReadKBytesTot += $val;
     } elsif ($metric =~ /^write/) {
       my $attr = ${ostData}{$ostName}{write};
-      my $val = delta($ops, $attr->{last});
+      my $val = LustreCommon::delta($ops, $attr->{last});
       $attr->{value} = $val;
       $attr->{last} = $ops;
       $lustreWriteOpsTot += $val;
 
       $attr = $ostData{$ostName}{writeKB};
       my $KBytes = $bytes / $OneKB;
-      $val = delta($KBytes, $attr->{last});
+      $val = LustreCommon::delta($KBytes, $attr->{last});
       $attr->{value} = $val;
       $attr->{last} = $KBytes;
       $lustreWriteKBytesTot += $val;
@@ -500,7 +493,7 @@ sub lustreOSSAnalyze {
             $ostAttr->{$client} = {'value' => 0, 'last' => $bytes};
           } else {
             my $attr = ${$ostAttr}{$client};
-            $attr->{value} = delta($bytes, $attr->{last});
+            $attr->{value} = LustreCommon::delta($bytes, $attr->{last});
             $attr->{last} = $bytes;
           }
         }
@@ -519,13 +512,13 @@ sub lustreOSSAnalyze {
     my ($reads, $writes) = (split(/\s+/, $data))[1,5];
 
     my $attr = $ostData{$ostName}{rpc_read}[$bufNum];
-    my $val = delta($reads, $attr->{last});
+    my $val = LustreCommon::delta($reads, $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $reads;
     $lustreBufReadTot[$bufNum] += $val;
 
     $attr = $ostData{$ostName}{rpc_write}[$bufNum];
-    $val = delta($writes, $attr->{last});
+    $val = LustreCommon::delta($writes, $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $writes;
     $lustreBufWriteTot[$bufNum] += $val;
@@ -542,13 +535,13 @@ sub lustreOSSAnalyze {
     my ($reads, $writes) = (split(/\s+/, $data))[1,5];
 
     my $attr = $ostData{$ostName}{disk_iosize_read}[$bufNum];
-    my $val = delta($reads, $attr->{last});
+    my $val = LustreCommon::delta($reads, $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $reads;
     $lustreDiskIoSizeReadTot[$bufNum] += $val;
 
     $attr = $ostData{$ostName}{disk_iosize_write}[$bufNum];
-    $val = delta($writes, $attr->{last});
+    $val = LustreCommon::delta($writes, $attr->{last});
     $attr->{value} = $val;
     $attr->{last} = $writes;
     $lustreDiskIoSizeWriteTot[$bufNum] += $val;
