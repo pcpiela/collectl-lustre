@@ -671,7 +671,7 @@ sub lustreMDSPrintExport {
 	  push @$ref1, 'lusmds.active';
 	  push @$ref2, 'RPCs';
 	  push @$ref3, $mdsData{req_active}{value};
-	  push @$ref4, 'Lustre MDS RPC',;
+	  push @$ref4, 'Lustre MDS RPC';
 	  push @$ref5, 'Active Requests';
 	}
 
@@ -721,7 +721,7 @@ sub lustreMDSPrintExport {
 	  $mdsData{rmdir}{value};
 
         push @$ref1, 'lusmds.unlink';
-        push @$ref2, 'ops/sec', 
+        push @$ref2, 'ops/sec'; 
         push @$ref3, $delete / $intSecs;
         push @$ref4, 'Lustre MDS';
         push @$ref5, 'File/Dir Deletes';
@@ -737,8 +737,8 @@ sub lustreMDSPrintExport {
         push @$ref5, 'File/Dir Creates';
 
         push @$ref1, 'lusmds.open';
-        push @$ref2, 'ops/sec',
-        push @$ref3, $mdsData{open}{value} / $intSecs,;
+        push @$ref2, 'ops/sec';
+        push @$ref3, $mdsData{open}{value} / $intSecs;
         push @$ref4, 'Lustre MDS';
         push @$ref5, 'File Opens';
 
