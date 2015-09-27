@@ -15,6 +15,8 @@ our ($miniDateTime, $options, $FS, $Host, $XCFlag, $interval, $count);
 our ($sameColsFlag, $subsys, $ReqDir);
 
 require "$ReqDir/LustreSingleton.pm";
+use lib "$ReqDir";
+use LustreCommon;
 
 # Global to this module
 my $lustOpts = undef;
@@ -533,7 +535,7 @@ sub lustreClientAnalyze {
 
       $value = 0 if !defined($value);
       my $readKB = $clientFSData{$fsName}{readKB};
-      $readKB->{value} = fix(($value - $readKB->{last}) / $OneKB);
+      $readKB->{value} = LustreCommon::delta($value, $readKB->{last}) / $OneKB;
       $readKB->{last} = $value;
       $lustreCltReadKBTot += $readKB->{value};
     } elsif ($metric =~ /write_bytes/) {
@@ -542,7 +544,7 @@ sub lustreClientAnalyze {
 
       $value = 0 if !defined($value);
       my $writeKB = $clientFSData{$fsName}{writeKB};
-      $writeKB->{value} = fix(($value - $writeKB->{last}) / $OneKB);
+      $writeKB->{value} = LustreCommon::delta($value, $writeKB->{last}) / $OneKB;
       $writeKB->{last} = $value;
       $lustreCltWriteKBTot += $writeKB->{value};
     } elsif ($metric =~ /open/) { 
@@ -567,7 +569,7 @@ sub lustreClientAnalyze {
 
     if (defined($attrId) && defined($ops)) {
       my $attr = $clientFSData{$fsName}{$attrId};
-      my $value = fix($ops - $attr->{last});
+      my $value = LustreCommon::delta($ops, $attr->{last});
       $attr->{value} = $value;
       $attr->{last} = $ops;
       ${$tot} += $value if defined($tot);
@@ -635,7 +637,7 @@ sub lustreClientAnalyze {
 
     if (defined($attrId) && defined($ops)) {
       my $attr = $clientFSData{$fsName}{$attrId};
-      my $value = fix($ops - $attr->{last});
+      my $value = LustreCommon::delta($ops, $attr->{last});
       $attr->{value} = $value;
       $attr->{last} = $ops;
       ${$tot} += $value if defined($tot);
@@ -647,12 +649,12 @@ sub lustreClientAnalyze {
     my ($reads, $writes) = (split(/\s+/, $data))[1, 5];
 
     my $attr = $clientOstRpcReadData{$ostName}[$bufNum];
-    $attr->{value} = fix($reads - $attr->{last});
+    $attr->{value} = LustreCommon::delta($reads, $attr->{last});
     $attr->{last} = $reads;
     $clientRpcReadTot[$bufNum] += $attr->{value};
 
     $attr = $clientOstRpcWriteData{$ostName}[$bufNum];
-    $attr->{value} = fix($writes - $attr->{last});
+    $attr->{value} = LustreCommon::delta($writes, $attr->{last});
     $attr->{last} = $writes;
     $clientRpcWriteTot[$bufNum] += $attr->{value};
   } elsif ($type =~ /LLDET:(.*)/) {
@@ -661,20 +663,20 @@ sub lustreClientAnalyze {
     
     if ($metric =~ /^read_bytes|ost_r/) {
       my $attr = $clientOstData{$ostName}{lun_read};
-      $attr->{value} = fix($ops - $attr->{last});
+      $attr->{value} = LustreCommon::delta($ops, $attr->{last});
       $attr->{last} = $ops;
       if (defined($value)) { # not always defined
         $attr = $clientOstData{$ostName}{lun_readKB};
-        $attr->{value} = fix(($value - $attr->{last}) / $OneKB);
+        $attr->{value} = LustreCommon::delta($value, $attr->{last}) / $OneKB;
         $attr->{last} = $value;
       }
     } elsif ($metric =~ /^write_bytes|ost_w/) {
       my $attr = $clientOstData{$ostName}{lun_write};
-      $attr->{value} = fix($ops - $attr->{last});
+      $attr->{value} = LustreCommon::delta($ops, $attr->{last});
       $attr->{last} = $ops;
       if (defined($value)) { # not always defined
         $attr = $clientOstData{$ostName}{lun_writeKB};
-        $attr->{value} = fix(($value - $attr->{last}) / $OneKB);
+        $attr->{value} = LustreCommon::delta($value, $attr->{last}) / $OneKB;
         $attr->{last} = $value;
       }
     }
