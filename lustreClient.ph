@@ -1606,10 +1606,10 @@ sub lustreClientPrintExport {
         my ($reads, $readKBs, $writes, $writeKBs) = (0, 0, 0, 0);
         foreach my $fsName (@clientFSNames) {
           my $fs = $clientFSData{$fsName};
-          $reads += $fs->{read}{last};
-          $readKBs += $fs->{readKB}{last};
-          $writes += $fs->{write}{last};
-          $writeKBs += $fs->{writeKB}{last};
+          $reads += $fs->{read}{value};
+          $readKBs += $fs->{readKB}{value};
+          $writes += $fs->{write}{value};
+          $writeKBs += $fs->{writeKB}{value};
         }
         $$ref1 .= "$pad(lusclt (reads $reads) (readkbs $readKBs) (writes $writes) (writekbs $writeKBs) (numfs $numClientFS))\n";
       }
