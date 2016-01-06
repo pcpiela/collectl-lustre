@@ -1311,7 +1311,7 @@ sub lustreClientPrintExport {
       if ($cltFlag) {
         push @$ref1, 'lusclt.reads';
         push @$ref2, 'reads/sec';
-        push @$ref3, $lustreCltReadTot / $intSecs, 
+        push @$ref3, $lustreCltReadTot / $intSecs;
         push @$ref4, 'Lustre client';
         push @$ref5, undef;
 
